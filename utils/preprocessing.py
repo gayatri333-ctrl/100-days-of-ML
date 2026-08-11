@@ -54,9 +54,8 @@ def k_fold_split(X, y, n_splits=5, random_state=None, shuffle=True):
         rng = np.random.default_rng(random_state)
         rng.shuffle(indices)
 
-    # Split indices into n_splits roughly equal chunks
     fold_sizes = np.full(n_splits, n_samples // n_splits, dtype=int)
-    fold_sizes[: n_samples % n_splits] += 1  # distribute the remainder
+    fold_sizes[: n_samples % n_splits] += 1
 
     current = 0
     folds = []
@@ -105,8 +104,86 @@ def cross_val_score(model_class, X, y, n_splits=5, metric_fn=None, random_state=
     return np.array(scores)
 
 
+# ---------- Feature Scaling ----------
+
+class StandardScaler:
+    """
+    Standardization (Z-score scaling): rescales each feature to have
+    mean = 0 and standard deviation = 1.
+
+        x_scaled = (x - mean) / std
+
+    This is the default choice for most ML algorithms — especially
+    gradient descent (converges much faster and more evenly across
+    features), and distance-based methods like KNN and SVM.
+
+    IMPORTANT: fit only on training data, then use the SAME mean/std
+    to transform both train and test sets. Never fit on test data —
+    that would leak test set information into training.
+    """
+
+    def __init__(self):
+        self.mean_ = None
+        self.std_ = None
+
+    def fit(self, X):
+        X = np.array(X)
+        self.mean_ = X.mean(axis=0)
+        self.std_ = X.std(axis=0)
+        # avoid divide-by-zero for constant features
+        self.std_ = np.where(self.std_ == 0, 1.0, self.std_)
+        return self
+
+    def transform(self, X):
+        X = np.array(X)
+        return (X - self.mean_) / self.std_
+
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
+
+    def inverse_transform(self, X_scaled):
+        X_scaled = np.array(X_scaled)
+        return (X_scaled * self.std_) + self.mean_
+
+
+class MinMaxScaler:
+    """
+    Normalization (Min-Max scaling): rescales each feature into a fixed
+    range, [0, 1] by default.
+
+        x_scaled = (x - min) / (max - min)
+
+    Useful when you need bounded values (e.g. neural network inputs,
+    image pixel values), but more sensitive to outliers than
+    StandardScaler since a single extreme value stretches the whole range.
+    """
+
+    def __init__(self, feature_range=(0, 1)):
+        self.feature_range = feature_range
+        self.min_ = None
+        self.max_ = None
+
+    def fit(self, X):
+        X = np.array(X)
+        self.min_ = X.min(axis=0)
+        self.max_ = X.max(axis=0)
+        return self
+
+    def transform(self, X):
+        X = np.array(X)
+        data_range = self.max_ - self.min_
+        data_range = np.where(data_range == 0, 1.0, data_range)  # avoid divide-by-zero
+
+        X_std = (X - self.min_) / data_range
+        low, high = self.feature_range
+        return X_std * (high - low) + low
+
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
+
+
 if __name__ == "__main__":
-    # Quick sanity check
+    # ---- Train/test split + K-Fold sanity check (from Day 11) ----
     np.random.seed(42)
     X = np.arange(20).reshape(-1, 1)
     y = np.arange(20)
@@ -117,3 +194,18 @@ if __name__ == "__main__":
     print("\nK-Fold splits (n_splits=5):")
     for fold_i, (X_tr, X_val, y_tr, y_val) in enumerate(k_fold_split(X, y, n_splits=5, random_state=42)):
         print(f"Fold {fold_i}: train size={len(X_tr)}, val size={len(X_val)}, val indices/values={y_val}")
+
+    # ---- Feature scaling sanity check (Day 12) ----
+    print("\n===== Feature Scaling Demo =====")
+    X_demo = np.array([[1.0, 100.0], [2.0, 200.0], [3.0, 300.0], [4.0, 400.0], [5.0, 500.0]])
+
+    std_scaler = StandardScaler()
+    X_standardized = std_scaler.fit_transform(X_demo)
+    print("Original:\n", X_demo)
+    print("Standardized (mean=0, std=1):\n", np.round(X_standardized, 3))
+    print("Mean after scaling (should be ~0):", np.round(X_standardized.mean(axis=0), 6))
+    print("Std after scaling (should be ~1):", np.round(X_standardized.std(axis=0), 6))
+
+    minmax_scaler = MinMaxScaler()
+    X_normalized = minmax_scaler.fit_transform(X_demo)
+    print("\nNormalized (range [0, 1]):\n", np.round(X_normalized, 3))
